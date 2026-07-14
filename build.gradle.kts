@@ -45,7 +45,7 @@ spotless {
         formatAnnotations()
     }
     yaml {
-        target("src/resources/*.yml")
+        target("src/main/resources/*.yml")
         jackson()
     }
 }

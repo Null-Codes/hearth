@@ -2,7 +2,6 @@ package com.null_codes.hearth.model;
 
 import java.util.UUID;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.util.BoundingBox;
 

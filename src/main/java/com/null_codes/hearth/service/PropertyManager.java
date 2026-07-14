@@ -47,5 +47,4 @@ public class PropertyManager {
     }
     return null;
   }
-
 }

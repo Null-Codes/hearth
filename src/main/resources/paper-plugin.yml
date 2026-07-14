@@ -1,5 +1,7 @@
-name: Hearth
-version: ${version}
-main: com.null_codes.hearth.HearthPlugin
+---
+name: "Hearth"
+version: "${version}"
+main: "com.null_codes.hearth.HearthPlugin"
 api-version: "26.1.2"
-authors: ["Null_Codes"]
+authors:
+- "Null_Codes"

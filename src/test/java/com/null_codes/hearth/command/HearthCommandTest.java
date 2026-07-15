@@ -42,7 +42,8 @@ class HearthCommandTest {
   }
 
   private static LiteralCommandNode<CommandSourceStack> command() {
-    return new HearthCommand(new PropertyManager(), new PropertyChangeManager()).createCommand();
+    return new HearthCommand(new PropertyManager(), new PropertyChangeManager(), Runnable::run)
+        .createCommand();
   }
 
   @SuppressWarnings("unchecked")

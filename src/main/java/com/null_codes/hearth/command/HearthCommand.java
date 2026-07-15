@@ -26,6 +26,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
+import java.util.function.Supplier;
 import org.bukkit.World;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -39,16 +42,25 @@ public final class HearthCommand {
 
   private final PropertyManager propertyManager;
   private final PropertyChangeManager changeManager;
+  private final Executor mainThreadExecutor;
 
-  public HearthCommand(PropertyManager propertyManager, PropertyChangeManager changeManager) {
+  public HearthCommand(
+      PropertyManager propertyManager,
+      PropertyChangeManager changeManager,
+      Executor mainThreadExecutor) {
     this.propertyManager = propertyManager;
     this.changeManager = changeManager;
+    this.mainThreadExecutor = mainThreadExecutor;
   }
 
   public LiteralCommandNode<CommandSourceStack> createCommand() {
     LiteralArgumentBuilder<CommandSourceStack> root =
         Commands.literal("hearth")
-            .requires(source -> source.getSender().hasPermission("hearth.admin"));
+            .requires(
+                source ->
+                    source.getSender().hasPermission("hearth.admin")
+                        && propertyManager.isReady()
+                        && changeManager.isReady());
 
     root.then(createBranch());
     root.then(renameBranch());
@@ -186,9 +198,20 @@ public final class HearthCommand {
     return propertyUuids;
   }
 
-  private int execute(CommandSourceStack source, Runnable action) {
+  private int execute(CommandSourceStack source, Supplier<CompletableFuture<?>> action) {
     try {
-      action.run();
+      action
+          .get()
+          .whenComplete(
+              (ignored, failure) -> {
+                if (failure != null) {
+                  mainThreadExecutor.execute(
+                      () ->
+                          source
+                              .getSender()
+                              .sendMessage("Hearth: " + rootCause(failure).getMessage()));
+                }
+              });
       return Command.SINGLE_SUCCESS;
     } catch (IllegalArgumentException exception) {
       source.getSender().sendMessage("Hearth: " + exception.getMessage());
@@ -196,7 +219,15 @@ public final class HearthCommand {
     }
   }
 
-  private void create(CommandSourceStack source, String name, int radius) {
+  private static Throwable rootCause(Throwable failure) {
+    Throwable cause = failure;
+    while (cause instanceof CompletionException && cause.getCause() != null) {
+      cause = cause.getCause();
+    }
+    return cause;
+  }
+
+  private CompletableFuture<Void> create(CommandSourceStack source, String name, int radius) {
     if (!(source.getExecutor() instanceof Player player)) {
       throw new IllegalArgumentException("Only a player can create a property.");
     }
@@ -219,13 +250,18 @@ public final class HearthCommand {
                 z + radius + 1),
             System.currentTimeMillis());
 
-    propertyManager.register(property);
-    source
-        .getSender()
-        .sendMessage("Hearth: created " + property.name() + " (" + property.uuid() + ").");
+    return propertyManager
+        .register(property)
+        .thenRunAsync(
+            () ->
+                source
+                    .getSender()
+                    .sendMessage(
+                        "Hearth: created " + property.name() + " (" + property.uuid() + ")."),
+            mainThreadExecutor);
   }
 
-  private void rename(CommandSourceStack source, String value, String name) {
+  private CompletableFuture<Void> rename(CommandSourceStack source, String value, String name) {
     Property existing = requiredProperty(value);
     Property renamed =
         new Property(
@@ -235,30 +271,45 @@ public final class HearthCommand {
             existing.world(),
             existing.region(),
             existing.timestamp());
-    propertyManager.update(renamed);
-    source
-        .getSender()
-        .sendMessage("Hearth: renamed property " + renamed.uuid() + " to " + renamed.name() + ".");
+    return propertyManager
+        .update(renamed)
+        .thenRunAsync(
+            () ->
+                source
+                    .getSender()
+                    .sendMessage(
+                        "Hearth: renamed property "
+                            + renamed.uuid()
+                            + " to "
+                            + renamed.name()
+                            + "."),
+            mainThreadExecutor);
   }
 
-  private void remove(CommandSourceStack source, String value) {
+  private CompletableFuture<Void> remove(CommandSourceStack source, String value) {
     Property property = requiredProperty(value);
-    propertyManager.remove(property.uuid());
-    source
-        .getSender()
-        .sendMessage("Hearth: removed " + property.name() + " (" + property.uuid() + ").");
+    return propertyManager
+        .remove(property.uuid())
+        .thenAcceptAsync(
+            ignored ->
+                source
+                    .getSender()
+                    .sendMessage(
+                        "Hearth: removed " + property.name() + " (" + property.uuid() + ")."),
+            mainThreadExecutor);
   }
 
-  private void list(CommandSourceStack source) {
+  private CompletableFuture<Void> list(CommandSourceStack source) {
     List<Property> properties = propertyManager.getProperties();
     CommandSender sender = source.getSender();
     sender.sendMessage("Hearth: " + properties.size() + " properties registered.");
     for (Property property : properties) {
       sender.sendMessage("- " + property.uuid() + " " + property.name());
     }
+    return CompletableFuture.completedFuture(null);
   }
 
-  private void history(CommandSourceStack source, String value) {
+  private CompletableFuture<Void> history(CommandSourceStack source, String value) {
     LinkedHashSet<UUID> candidates = new LinkedHashSet<>(activePropertyUuids());
     candidates.addAll(changeManager.getPropertyUuids());
     UUID propertyUuid = UuidPrefixResolver.resolve(candidates, value);
@@ -266,23 +317,30 @@ public final class HearthCommand {
     source
         .getSender()
         .sendMessage("Hearth: property " + propertyUuid + " has " + count + " recorded changes.");
+    return CompletableFuture.completedFuture(null);
   }
 
-  private void stress(CommandSourceStack source, String value, int count, long seed) {
+  private CompletableFuture<Void> stress(
+      CommandSourceStack source, String value, int count, long seed) {
     Property property = requiredProperty(value);
     long started = System.nanoTime();
-    PropertyChangeWorkload.generate(changeManager, property.uuid(), property.world(), count, seed);
-    long elapsedMillis = (System.nanoTime() - started) / 1_000_000;
-    source
-        .getSender()
-        .sendMessage(
-            "Hearth: recorded "
-                + count
-                + " deterministic changes in "
-                + elapsedMillis
-                + " ms (seed "
-                + seed
-                + ").");
+    return PropertyChangeWorkload.generate(
+            changeManager, property.uuid(), property.world(), count, seed)
+        .thenAcceptAsync(
+            recordedCount -> {
+              long elapsedMillis = (System.nanoTime() - started) / 1_000_000;
+              source
+                  .getSender()
+                  .sendMessage(
+                      "Hearth: persisted "
+                          + recordedCount
+                          + " deterministic changes in "
+                          + elapsedMillis
+                          + " ms (seed "
+                          + seed
+                          + ").");
+            },
+            mainThreadExecutor);
   }
 
   private Property requiredProperty(String value) {

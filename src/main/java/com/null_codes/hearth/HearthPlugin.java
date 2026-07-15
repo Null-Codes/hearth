@@ -6,6 +6,8 @@ import com.null_codes.hearth.service.PropertyChangeManager;
 import com.null_codes.hearth.service.PropertyManager;
 import com.null_codes.hearth.storage.SqliteHearthStore;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
+import java.util.concurrent.CompletableFuture;
+import java.util.logging.Level;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -40,9 +42,28 @@ public class HearthPlugin extends JavaPlugin {
                             .createCommand(),
                         "Manage properties and generate profiling workloads."));
 
-    PluginManager pm = getServer().getPluginManager();
-    pm.registerEvents(
-        new PropertyEventListener(getLogger(), propertyManager, propertyChangeManager), this);
+    CompletableFuture.allOf(propertyManager.ready(), propertyChangeManager.ready())
+        .whenComplete(
+            (ignored, failure) ->
+                getServer()
+                    .getScheduler()
+                    .runTask(
+                        this,
+                        () -> {
+                          if (failure != null) {
+                            getLogger().log(Level.SEVERE, "Could not load Hearth data.", failure);
+                            getServer().getPluginManager().disablePlugin(this);
+                            return;
+                          }
+                          if (!isEnabled()) return;
+
+                          PluginManager pluginManager = getServer().getPluginManager();
+                          pluginManager.registerEvents(
+                              new PropertyEventListener(
+                                  getLogger(), propertyManager, propertyChangeManager),
+                              this);
+                          getLogger().info("Hearth data loaded; property tracking is active.");
+                        }));
   }
 
   @Override

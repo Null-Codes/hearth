@@ -2,6 +2,7 @@ package com.null_codes.hearth.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -64,7 +65,7 @@ public class PropertyManagerTest {
     UUID propertyUuid = property.uuid();
 
     propertyManager.register(property);
-    propertyManager.remove(propertyUuid);
+    assertTrue(propertyManager.remove(propertyUuid));
     assertFalse(propertyManager.get(propertyUuid).isPresent());
   }
 
@@ -76,10 +77,51 @@ public class PropertyManagerTest {
     propertyManager.register(propertyOne);
     List<Property> props1 = propertyManager.getProperties();
 
-    propertyManager.remove(propertyTwo);
+    assertFalse(propertyManager.remove(propertyTwo));
     List<Property> props2 = propertyManager.getProperties();
 
     assertEquals(props1, props2);
+  }
+
+  @Test
+  void updateReplacesPropertyWithSameUuid() {
+    Property original = testProperty();
+    Property updated =
+        new Property(
+            original.uuid(),
+            original.owner(),
+            "Renamed Property",
+            original.world(),
+            original.region(),
+            original.timestamp());
+    propertyManager.register(original);
+
+    propertyManager.update(updated);
+
+    assertSame(updated, propertyManager.get(original.uuid()).orElseThrow());
+  }
+
+  @Test
+  void updateRejectsUnknownProperty() {
+    Property property = testProperty();
+
+    assertThrows(IllegalArgumentException.class, () -> propertyManager.update(property));
+  }
+
+  @Test
+  void updateRejectsChangedCreationTimestamp() {
+    Property original = testProperty();
+    Property changedTimestamp =
+        new Property(
+            original.uuid(),
+            original.owner(),
+            original.name(),
+            original.world(),
+            original.region(),
+            original.timestamp() + 1);
+    propertyManager.register(original);
+
+    assertThrows(IllegalArgumentException.class, () -> propertyManager.update(changedTimestamp));
   }
 
   @Test

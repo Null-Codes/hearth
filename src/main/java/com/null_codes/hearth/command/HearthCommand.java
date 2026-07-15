@@ -138,9 +138,9 @@ public final class HearthCommand implements BasicCommand {
       throw new IllegalArgumentException("Usage: /hearth history <property UUID>");
     }
 
-    Property property = requiredProperty(args[1]);
-    int count = changeManager.getChanges(property.uuid()).size();
-    sender.sendMessage("Hearth: " + property.name() + " has " + count + " recorded changes.");
+    UUID propertyUuid = UUID.fromString(args[1]);
+    int count = changeManager.getChanges(propertyUuid).size();
+    sender.sendMessage("Hearth: property " + propertyUuid + " has " + count + " recorded changes.");
   }
 
   private void stress(CommandSender sender, String[] args) {

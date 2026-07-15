@@ -64,6 +64,17 @@ class BlockSnapshotTest {
   }
 
   @Test
+  void airFactoryUsesCanonicalAirData() {
+    java.util.UUID worldUuid = java.util.UUID.fromString("10000000-0000-0000-0000-000000000000");
+
+    BlockSnapshot snapshot = BlockSnapshot.airAt(worldUuid, 4, 64, -2);
+
+    assertEquals(Material.AIR, snapshot.material());
+    assertEquals("minecraft:air", snapshot.blockData());
+    assertEquals(worldUuid, snapshot.worldUuid());
+  }
+
+  @Test
   void airCanBeRepresentedExplicitly() {
     BlockSnapshot snapshot = new BlockSnapshot(Material.AIR, 5, 70, 12, null, "minecraft:air");
 

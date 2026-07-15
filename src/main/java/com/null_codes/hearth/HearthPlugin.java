@@ -33,9 +33,8 @@ public class HearthPlugin extends JavaPlugin {
                 event
                     .registrar()
                     .register(
-                        "hearth",
-                        "Manage properties and generate profiling workloads.",
-                        new HearthCommand(propertyManager, propertyChangeManager)));
+                        new HearthCommand(propertyManager, propertyChangeManager).createCommand(),
+                        "Manage properties and generate profiling workloads."));
 
     PluginManager pm = getServer().getPluginManager();
     pm.registerEvents(new PropertyEventListener(propertyManager, propertyChangeManager), this);

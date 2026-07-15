@@ -1,22 +1,38 @@
 package com.null_codes.hearth.command;
 
+import static com.mojang.brigadier.arguments.IntegerArgumentType.getInteger;
+import static com.mojang.brigadier.arguments.LongArgumentType.getLong;
+import static com.mojang.brigadier.arguments.StringArgumentType.getString;
+
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.LongArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.builder.RequiredArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.suggestion.Suggestions;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
+import com.mojang.brigadier.tree.LiteralCommandNode;
 import com.null_codes.hearth.model.Property;
 import com.null_codes.hearth.service.PropertyChangeManager;
 import com.null_codes.hearth.service.PropertyChangeWorkload;
 import com.null_codes.hearth.service.PropertyManager;
-import io.papermc.paper.command.brigadier.BasicCommand;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
+import io.papermc.paper.command.brigadier.Commands;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import org.bukkit.World;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.util.BoundingBox;
 
-/** Provides the minimal operator surface needed to exercise Hearth on a development server. */
-public final class HearthCommand implements BasicCommand {
+/** Builds Hearth's native Brigadier command tree. */
+public final class HearthCommand {
 
   private static final int DEFAULT_RADIUS = 8;
   private static final int MAX_STRESS_CHANGES = 100_000;
@@ -29,59 +45,170 @@ public final class HearthCommand implements BasicCommand {
     this.changeManager = changeManager;
   }
 
-  @Override
-  public void execute(CommandSourceStack source, String[] args) {
-    CommandSender sender = source.getSender();
-    if (args.length == 0) {
-      sendUsage(sender);
-      return;
-    }
+  public LiteralCommandNode<CommandSourceStack> createCommand() {
+    LiteralArgumentBuilder<CommandSourceStack> root =
+        Commands.literal("hearth")
+            .requires(source -> source.getSender().hasPermission("hearth.admin"));
 
+    root.then(createBranch());
+    root.then(renameBranch());
+    root.then(removeBranch());
+    root.then(
+        Commands.literal("list")
+            .executes(context -> execute(context.getSource(), () -> list(context.getSource()))));
+    root.then(historyBranch());
+    root.then(stressBranch());
+    return root.build();
+  }
+
+  private LiteralArgumentBuilder<CommandSourceStack> createBranch() {
+    RequiredArgumentBuilder<CommandSourceStack, String> name =
+        Commands.argument("name", StringArgumentType.word())
+            .executes(
+                context ->
+                    execute(
+                        context.getSource(),
+                        () ->
+                            create(
+                                context.getSource(), getString(context, "name"), DEFAULT_RADIUS)));
+    name.then(
+        Commands.argument("radius", IntegerArgumentType.integer(0))
+            .executes(
+                context ->
+                    execute(
+                        context.getSource(),
+                        () ->
+                            create(
+                                context.getSource(),
+                                getString(context, "name"),
+                                getInteger(context, "radius")))));
+    return Commands.literal("create").then(name);
+  }
+
+  private LiteralArgumentBuilder<CommandSourceStack> renameBranch() {
+    return Commands.literal("rename")
+        .then(
+            activePropertyArgument()
+                .then(
+                    Commands.argument("name", StringArgumentType.word())
+                        .executes(
+                            context ->
+                                execute(
+                                    context.getSource(),
+                                    () ->
+                                        rename(
+                                            context.getSource(),
+                                            getString(context, "property"),
+                                            getString(context, "name"))))));
+  }
+
+  private LiteralArgumentBuilder<CommandSourceStack> removeBranch() {
+    return Commands.literal("remove")
+        .then(
+            activePropertyArgument()
+                .executes(
+                    context ->
+                        execute(
+                            context.getSource(),
+                            () -> remove(context.getSource(), getString(context, "property")))));
+  }
+
+  private LiteralArgumentBuilder<CommandSourceStack> historyBranch() {
+    return Commands.literal("history")
+        .then(
+            Commands.argument("property", StringArgumentType.word())
+                .suggests(this::suggestHistoryProperties)
+                .executes(
+                    context ->
+                        execute(
+                            context.getSource(),
+                            () -> history(context.getSource(), getString(context, "property")))));
+  }
+
+  private LiteralArgumentBuilder<CommandSourceStack> stressBranch() {
+    RequiredArgumentBuilder<CommandSourceStack, Integer> count =
+        Commands.argument("count", IntegerArgumentType.integer(0, MAX_STRESS_CHANGES))
+            .executes(
+                context ->
+                    execute(
+                        context.getSource(),
+                        () ->
+                            stress(
+                                context.getSource(),
+                                getString(context, "property"),
+                                getInteger(context, "count"),
+                                42L)));
+    count.then(
+        Commands.argument("seed", LongArgumentType.longArg())
+            .executes(
+                context ->
+                    execute(
+                        context.getSource(),
+                        () ->
+                            stress(
+                                context.getSource(),
+                                getString(context, "property"),
+                                getInteger(context, "count"),
+                                getLong(context, "seed")))));
+    return Commands.literal("stress").then(activePropertyArgument().then(count));
+  }
+
+  private RequiredArgumentBuilder<CommandSourceStack, String> activePropertyArgument() {
+    return Commands.argument("property", StringArgumentType.word())
+        .suggests(this::suggestActiveProperties);
+  }
+
+  private CompletableFuture<Suggestions> suggestActiveProperties(
+      CommandContext<CommandSourceStack> context, SuggestionsBuilder builder) {
+    return suggest(builder, activePropertyUuids());
+  }
+
+  private CompletableFuture<Suggestions> suggestHistoryProperties(
+      CommandContext<CommandSourceStack> context, SuggestionsBuilder builder) {
+    LinkedHashSet<UUID> candidates = new LinkedHashSet<>(activePropertyUuids());
+    candidates.addAll(changeManager.getPropertyUuids());
+    return suggest(builder, candidates);
+  }
+
+  private static CompletableFuture<Suggestions> suggest(
+      SuggestionsBuilder builder, Collection<UUID> candidates) {
+    for (String suggestion : UuidPrefixResolver.suggestions(candidates, builder.getRemaining())) {
+      builder.suggest(suggestion);
+    }
+    return builder.buildFuture();
+  }
+
+  private List<UUID> activePropertyUuids() {
+    List<UUID> propertyUuids = new ArrayList<>();
+    for (Property property : propertyManager.getProperties()) {
+      propertyUuids.add(property.uuid());
+    }
+    return propertyUuids;
+  }
+
+  private int execute(CommandSourceStack source, Runnable action) {
     try {
-      switch (args[0].toLowerCase(Locale.ROOT)) {
-        case "create" -> create(sender, args);
-        case "rename" -> rename(sender, args);
-        case "remove" -> remove(sender, args);
-        case "list" -> list(sender);
-        case "history" -> history(sender, args);
-        case "stress" -> stress(sender, args);
-        default -> sendUsage(sender);
-      }
+      action.run();
+      return Command.SINGLE_SUCCESS;
     } catch (IllegalArgumentException exception) {
-      sender.sendMessage("Hearth: " + exception.getMessage());
+      source.getSender().sendMessage("Hearth: " + exception.getMessage());
+      return 0;
     }
   }
 
-  @Override
-  public Collection<String> suggest(CommandSourceStack source, String[] args) {
-    if (args.length <= 1) {
-      return List.of("create", "rename", "remove", "list", "history", "stress");
-    }
-    return List.of();
-  }
-
-  @Override
-  public String permission() {
-    return "hearth.admin";
-  }
-
-  private void create(CommandSender sender, String[] args) {
-    if (!(sender instanceof Player player)) {
+  private void create(CommandSourceStack source, String name, int radius) {
+    if (!(source.getExecutor() instanceof Player player)) {
       throw new IllegalArgumentException("Only a player can create a property.");
     }
-    if (args.length < 2 || args.length > 3) {
-      throw new IllegalArgumentException("Usage: /hearth create <name> [radius]");
-    }
 
-    int radius = args.length == 3 ? parseNonNegativeInt(args[2], "radius") : DEFAULT_RADIUS;
     World world = player.getWorld();
-    int x = player.getLocation().getBlockX();
-    int z = player.getLocation().getBlockZ();
+    int x = source.getLocation().getBlockX();
+    int z = source.getLocation().getBlockZ();
     Property property =
         new Property(
             UUID.randomUUID(),
             player.getUniqueId(),
-            args[1],
+            name,
             world.getUID(),
             new BoundingBox(
                 x - radius,
@@ -93,96 +220,73 @@ public final class HearthCommand implements BasicCommand {
             System.currentTimeMillis());
 
     propertyManager.register(property);
-    sender.sendMessage("Hearth: created " + property.name() + " (" + property.uuid() + ").");
+    source
+        .getSender()
+        .sendMessage("Hearth: created " + property.name() + " (" + property.uuid() + ").");
   }
 
-  private void rename(CommandSender sender, String[] args) {
-    if (args.length != 3) {
-      throw new IllegalArgumentException("Usage: /hearth rename <property UUID> <name>");
-    }
-
-    Property existing = requiredProperty(args[1]);
+  private void rename(CommandSourceStack source, String value, String name) {
+    Property existing = requiredProperty(value);
     Property renamed =
         new Property(
             existing.uuid(),
             existing.owner(),
-            args[2],
+            name,
             existing.world(),
             existing.region(),
             existing.timestamp());
     propertyManager.update(renamed);
-    sender.sendMessage(
-        "Hearth: renamed property " + renamed.uuid() + " to " + renamed.name() + ".");
+    source
+        .getSender()
+        .sendMessage("Hearth: renamed property " + renamed.uuid() + " to " + renamed.name() + ".");
   }
 
-  private void remove(CommandSender sender, String[] args) {
-    if (args.length != 2) {
-      throw new IllegalArgumentException("Usage: /hearth remove <property UUID>");
-    }
-
-    Property property = requiredProperty(args[1]);
+  private void remove(CommandSourceStack source, String value) {
+    Property property = requiredProperty(value);
     propertyManager.remove(property.uuid());
-    sender.sendMessage("Hearth: removed " + property.name() + " (" + property.uuid() + ").");
+    source
+        .getSender()
+        .sendMessage("Hearth: removed " + property.name() + " (" + property.uuid() + ").");
   }
 
-  private void list(CommandSender sender) {
+  private void list(CommandSourceStack source) {
     List<Property> properties = propertyManager.getProperties();
+    CommandSender sender = source.getSender();
     sender.sendMessage("Hearth: " + properties.size() + " properties registered.");
     for (Property property : properties) {
       sender.sendMessage("- " + property.uuid() + " " + property.name());
     }
   }
 
-  private void history(CommandSender sender, String[] args) {
-    if (args.length != 2) {
-      throw new IllegalArgumentException("Usage: /hearth history <property UUID>");
-    }
-
-    UUID propertyUuid = UUID.fromString(args[1]);
+  private void history(CommandSourceStack source, String value) {
+    LinkedHashSet<UUID> candidates = new LinkedHashSet<>(activePropertyUuids());
+    candidates.addAll(changeManager.getPropertyUuids());
+    UUID propertyUuid = UuidPrefixResolver.resolve(candidates, value);
     int count = changeManager.getChanges(propertyUuid).size();
-    sender.sendMessage("Hearth: property " + propertyUuid + " has " + count + " recorded changes.");
+    source
+        .getSender()
+        .sendMessage("Hearth: property " + propertyUuid + " has " + count + " recorded changes.");
   }
 
-  private void stress(CommandSender sender, String[] args) {
-    if (args.length < 3 || args.length > 4) {
-      throw new IllegalArgumentException("Usage: /hearth stress <property UUID> <count> [seed]");
-    }
-
-    Property property = requiredProperty(args[1]);
-    int count = parseNonNegativeInt(args[2], "count");
-    if (count > MAX_STRESS_CHANGES) {
-      throw new IllegalArgumentException("count cannot exceed " + MAX_STRESS_CHANGES);
-    }
-    long seed = args.length == 4 ? Long.parseLong(args[3]) : 42L;
-
+  private void stress(CommandSourceStack source, String value, int count, long seed) {
+    Property property = requiredProperty(value);
     long started = System.nanoTime();
     PropertyChangeWorkload.generate(changeManager, property.uuid(), property.world(), count, seed);
     long elapsedMillis = (System.nanoTime() - started) / 1_000_000;
-    sender.sendMessage(
-        "Hearth: recorded "
-            + count
-            + " deterministic changes in "
-            + elapsedMillis
-            + " ms (seed "
-            + seed
-            + ").");
+    source
+        .getSender()
+        .sendMessage(
+            "Hearth: recorded "
+                + count
+                + " deterministic changes in "
+                + elapsedMillis
+                + " ms (seed "
+                + seed
+                + ").");
   }
 
   private Property requiredProperty(String value) {
-    UUID uuid = UUID.fromString(value);
-    return propertyManager
-        .get(uuid)
-        .orElseThrow(() -> new IllegalArgumentException("Unknown property UUID " + uuid + "."));
-  }
-
-  private static int parseNonNegativeInt(String value, String label) {
-    int parsed = Integer.parseInt(value);
-    if (parsed < 0) throw new IllegalArgumentException(label + " cannot be negative.");
-    return parsed;
-  }
-
-  private static void sendUsage(CommandSender sender) {
-    sender.sendMessage(
-        "Hearth: /hearth <create|rename|remove|list|history|stress> (requires hearth.admin)");
+    UUID uuid = UuidPrefixResolver.resolve(activePropertyUuids(), value);
+    return propertyManager.get(uuid).orElseThrow();
   }
 }

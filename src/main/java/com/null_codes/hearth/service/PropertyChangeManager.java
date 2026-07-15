@@ -23,10 +23,12 @@ public class PropertyChangeManager {
   }
 
   public Optional<PropertyChange> get(UUID uuid) {
+    Objects.requireNonNull(uuid, "uuid cannot be null");
     return changes.stream().filter(change -> change.uuid().equals(uuid)).findFirst();
   }
 
   public List<PropertyChange> getChanges(UUID propertyUuid) {
+    Objects.requireNonNull(propertyUuid, "propertyUuid cannot be null");
     return changes.stream().filter(change -> change.propertyUuid().equals(propertyUuid)).toList();
   }
 }

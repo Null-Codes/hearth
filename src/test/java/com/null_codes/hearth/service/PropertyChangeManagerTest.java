@@ -27,6 +27,12 @@ class PropertyChangeManagerTest {
   }
 
   @Test
+  void lookupRejectsNullUuids() {
+    assertThrows(NullPointerException.class, () -> manager.get(null));
+    assertThrows(NullPointerException.class, () -> manager.getChanges(null));
+  }
+
+  @Test
   void getReturnsEmptyWhenChangeDoesNotExist() {
     assertTrue(manager.get(UUID.randomUUID()).isEmpty());
   }

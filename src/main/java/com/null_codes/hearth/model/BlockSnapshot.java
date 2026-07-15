@@ -38,7 +38,6 @@ public record BlockSnapshot(
 
   public static BlockSnapshot airAt(UUID worldUuid, int x, int y, int z) {
     Objects.requireNonNull(worldUuid, "world UUID is null");
-    return new BlockSnapshot(
-        Material.AIR, x, y, z, worldUuid, Material.AIR.createBlockData().getAsString());
+    return new BlockSnapshot(Material.AIR, x, y, z, worldUuid, "minecraft:air");
   }
 }

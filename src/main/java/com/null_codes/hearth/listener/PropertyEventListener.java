@@ -5,10 +5,11 @@ import com.null_codes.hearth.model.Property;
 import com.null_codes.hearth.model.PropertyChange;
 import com.null_codes.hearth.service.PropertyChangeManager;
 import com.null_codes.hearth.service.PropertyManager;
+import java.util.Optional;
 import java.util.UUID;
-import java.util.logging.Logger;
 import org.bukkit.block.Block;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockBurnEvent;
@@ -18,41 +19,39 @@ import org.jetbrains.annotations.Nullable;
 
 public class PropertyEventListener implements Listener {
 
-  private final Logger logger;
   private final PropertyManager propertyManager;
   private final PropertyChangeManager changeManager;
 
   public PropertyEventListener(
-      Logger logger, PropertyManager propertyManager, PropertyChangeManager changeManager) {
-    this.logger = logger;
+      PropertyManager propertyManager, PropertyChangeManager changeManager) {
     this.propertyManager = propertyManager;
     this.changeManager = changeManager;
   }
 
   private void recordSimpleDestroy(
       Block block, @Nullable UUID playerUuid, PropertyChange.ChangeCause changeCause) {
-    Property property = propertyManager.findProperty(block.getLocation());
-    if (property == null) return;
+    Optional<Property> property = propertyManager.findProperty(block.getLocation());
+    if (property.isEmpty()) return;
 
     BlockSnapshot before = BlockSnapshot.from(block);
     BlockSnapshot after = BlockSnapshot.airAt(block);
     PropertyChange change =
-        PropertyChange.create(property.uuid(), playerUuid, changeCause, before, after);
+        new PropertyChange(property.get().uuid(), playerUuid, changeCause, before, after);
 
     changeManager.record(change);
   }
 
-  @EventHandler
+  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onBlockPlace(BlockPlaceEvent event) {
     Block block = event.getBlock();
-    Property property = propertyManager.findProperty(block.getLocation());
-    if (property == null) return;
+    Optional<Property> property = propertyManager.findProperty(block.getLocation());
+    if (property.isEmpty()) return;
 
-    BlockSnapshot before = BlockSnapshot.airAt(event.getBlock());
+    BlockSnapshot before = BlockSnapshot.from(event.getBlockReplacedState());
     BlockSnapshot after = BlockSnapshot.from(event.getBlock());
     PropertyChange change =
-        PropertyChange.create(
-            property.uuid(),
+        new PropertyChange(
+            property.get().uuid(),
             event.getPlayer().getUniqueId(),
             PropertyChange.ChangeCause.PLAYER_PLACE,
             before,
@@ -61,22 +60,20 @@ public class PropertyEventListener implements Listener {
     changeManager.record(change);
   }
 
-  @EventHandler
+  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onBlockBreak(BlockBreakEvent event) {
     recordSimpleDestroy(
         event.getBlock(), event.getPlayer().getUniqueId(), PropertyChange.ChangeCause.PLAYER_BREAK);
   }
 
-  @EventHandler
+  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onBlockBurn(BlockBurnEvent event) {
     recordSimpleDestroy(event.getBlock(), null, PropertyChange.ChangeCause.FIRE);
   }
 
-  @EventHandler
+  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onEntityExplode(EntityExplodeEvent event) {
     for (Block block : event.blockList()) {
-      Property property = propertyManager.findProperty(block.getLocation());
-      if (property == null) continue;
       recordSimpleDestroy(block, null, PropertyChange.ChangeCause.EXPLOSION);
     }
   }

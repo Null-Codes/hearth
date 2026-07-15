@@ -16,7 +16,6 @@ public class HearthPlugin extends JavaPlugin {
     PropertyChangeManager propertyChangeManager = new PropertyChangeManager();
 
     PluginManager pm = getServer().getPluginManager();
-    pm.registerEvents(
-        new PropertyEventListener(getLogger(), propertyManager, propertyChangeManager), this);
+    pm.registerEvents(new PropertyEventListener(propertyManager, propertyChangeManager), this);
   }
 }

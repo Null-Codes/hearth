@@ -56,6 +56,13 @@ public record PropertyChange(
     PLAYER_BREAK(true),
     FIRE(false),
     EXPLOSION(false),
+    LIQUID(false),
+    PISTON(false),
+    FALLING_BLOCK(false),
+    GROWTH(false),
+    DECAY(false),
+    ENTITY_CHANGE(false),
+    PLUGIN(false),
     RESTORATION(false);
 
     private final boolean requiresPlayer;

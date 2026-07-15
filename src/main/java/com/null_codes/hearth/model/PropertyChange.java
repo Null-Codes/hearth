@@ -3,62 +3,69 @@ package com.null_codes.hearth.model;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
-import org.jetbrains.annotations.Nullable;
 
 public record PropertyChange(
     UUID uuid,
     UUID propertyUuid,
     Instant timestamp,
-    @Nullable UUID playerUuid,
+    UUID playerUuid,
     ChangeCause cause,
     BlockSnapshot before,
     BlockSnapshot after) {
 
-  public PropertyChange {
-    Objects.requireNonNull(uuid, "uuid");
-    Objects.requireNonNull(propertyUuid, "propertyUuid");
-    Objects.requireNonNull(timestamp, "timestamp");
-    Objects.requireNonNull(cause, "cause");
-    Objects.requireNonNull(before, "before");
-    Objects.requireNonNull(after, "after");
-
-    if (!before.worldUuid().equals(after.worldUuid())
-        || before.x() != after.x()
-        || before.y() != after.y()
-        || before.z() != after.z()) {
-      throw new IllegalArgumentException(
-          "Before and after snapshots must represent the same block position.");
-    }
-  }
-
-  public static PropertyChange create(
+  public PropertyChange(
       UUID propertyUuid,
-      @Nullable UUID playerUuid,
+      UUID playerUuid,
       ChangeCause cause,
       BlockSnapshot before,
       BlockSnapshot after) {
 
-    return new PropertyChange(
-        UUID.randomUUID(), propertyUuid, Instant.now(), playerUuid, cause, before, after);
+    this(UUID.randomUUID(), propertyUuid, Instant.now(), playerUuid, cause, before, after);
+  }
+
+  public PropertyChange {
+    Objects.requireNonNull(uuid, "uuid cannot be null");
+    Objects.requireNonNull(propertyUuid, "propertyUuid cannot be null");
+    Objects.requireNonNull(timestamp, "timestamp cannot be null");
+    Objects.requireNonNull(cause, "cause cannot be null");
+    Objects.requireNonNull(before, "before snapshot cannot be null");
+    Objects.requireNonNull(after, "after snapshot cannot be null");
+
+    if (before.x() != after.x() || before.y() != after.y() || before.z() != after.z()) {
+      throw new IllegalArgumentException(
+          "Before and after snapshots must refer to the same block coordinates.");
+    }
+
+    if (!Objects.equals(before.worldUuid(), after.worldUuid())) {
+      throw new IllegalArgumentException(
+          "Before and after snapshots must refer to the same world.");
+    }
+
+    if (before.material() == after.material()
+        && Objects.equals(before.blockData(), after.blockData())) {
+      throw new IllegalArgumentException("PropertyChange must represent an actual block change.");
+    }
+
+    if (cause.requiresPlayer() && playerUuid == null) {
+      throw new IllegalArgumentException("A player UUID is required for " + cause + ".");
+    }
   }
 
   public enum ChangeCause {
-    PLAYER_BREAK,
-    PLAYER_PLACE,
+    PLAYER_PLACE(true),
+    PLAYER_BREAK(true),
+    FIRE(false),
+    EXPLOSION(false),
+    RESTORATION(false);
 
-    FIRE,
-    EXPLOSION,
-    LIQUID,
+    private final boolean requiresPlayer;
 
-    PISTON,
-    FALLING_BLOCK,
+    ChangeCause(boolean requiresPlayer) {
+      this.requiresPlayer = requiresPlayer;
+    }
 
-    GROWTH,
-    DECAY,
-
-    ENTITY_CHANGE,
-
-    PLUGIN,
-    RESTORATION
+    public boolean requiresPlayer() {
+      return requiresPlayer;
+    }
   }
 }

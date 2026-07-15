@@ -7,6 +7,8 @@ import com.null_codes.hearth.service.PropertyChangeManager;
 import com.null_codes.hearth.service.PropertyManager;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.bukkit.block.Block;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -19,11 +21,13 @@ import org.jetbrains.annotations.Nullable;
 
 public class PropertyEventListener implements Listener {
 
+  private final Logger logger;
   private final PropertyManager propertyManager;
   private final PropertyChangeManager changeManager;
 
   public PropertyEventListener(
-      PropertyManager propertyManager, PropertyChangeManager changeManager) {
+      Logger logger, PropertyManager propertyManager, PropertyChangeManager changeManager) {
+    this.logger = logger;
     this.propertyManager = propertyManager;
     this.changeManager = changeManager;
   }
@@ -38,7 +42,19 @@ public class PropertyEventListener implements Listener {
     PropertyChange change =
         new PropertyChange(property.get().uuid(), playerUuid, changeCause, before, after);
 
-    changeManager.record(change);
+    record(change);
+  }
+
+  private void record(PropertyChange change) {
+    changeManager
+        .record(change)
+        .whenComplete(
+            (ignored, failure) -> {
+              if (failure != null) {
+                logger.log(
+                    Level.SEVERE, "Could not persist property change " + change.uuid(), failure);
+              }
+            });
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -57,7 +73,7 @@ public class PropertyEventListener implements Listener {
             before,
             after);
 
-    changeManager.record(change);
+    record(change);
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

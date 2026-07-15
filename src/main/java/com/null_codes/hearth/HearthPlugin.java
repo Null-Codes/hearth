@@ -37,7 +37,8 @@ public class HearthPlugin extends JavaPlugin {
                         "Manage properties and generate profiling workloads."));
 
     PluginManager pm = getServer().getPluginManager();
-    pm.registerEvents(new PropertyEventListener(propertyManager, propertyChangeManager), this);
+    pm.registerEvents(
+        new PropertyEventListener(getLogger(), propertyManager, propertyChangeManager), this);
   }
 
   @Override

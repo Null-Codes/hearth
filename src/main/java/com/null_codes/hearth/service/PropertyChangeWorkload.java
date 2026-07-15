@@ -3,9 +3,12 @@ package com.null_codes.hearth.service;
 import com.null_codes.hearth.model.BlockSnapshot;
 import com.null_codes.hearth.model.PropertyChange;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import org.bukkit.Material;
 
 /**
@@ -38,7 +41,7 @@ public final class PropertyChangeWorkload {
    * @param seed seed controlling UUIDs, positions, materials, and players
    * @return the number of changes recorded
    */
-  public static int generate(
+  public static CompletableFuture<Integer> generate(
       PropertyChangeManager manager, UUID propertyUuid, UUID worldUuid, int count, long seed) {
     Objects.requireNonNull(manager, "manager cannot be null");
     Objects.requireNonNull(propertyUuid, "propertyUuid cannot be null");
@@ -46,6 +49,7 @@ public final class PropertyChangeWorkload {
     if (count < 0) throw new IllegalArgumentException("count cannot be negative");
 
     Random random = new Random(seed);
+    List<CompletableFuture<Void>> writes = new ArrayList<>(count);
     for (int index = 0; index < count; index++) {
       int x = random.nextInt(-2048, 2049);
       int y = random.nextInt(-64, 321);
@@ -69,9 +73,10 @@ public final class PropertyChangeWorkload {
                   : PropertyChange.ChangeCause.PLAYER_BREAK,
               placement ? air : solid,
               placement ? solid : air);
-      manager.record(change);
+      writes.add(manager.record(change));
     }
 
-    return count;
+    return CompletableFuture.allOf(writes.toArray(CompletableFuture[]::new))
+        .thenApply(ignored -> count);
   }
 }

@@ -16,8 +16,8 @@ class PropertyChangeWorkloadTest {
     PropertyChangeManager first = new PropertyChangeManager();
     PropertyChangeManager second = new PropertyChangeManager();
 
-    PropertyChangeWorkload.generate(first, PROPERTY_UUID, WORLD_UUID, 500, 42);
-    PropertyChangeWorkload.generate(second, PROPERTY_UUID, WORLD_UUID, 500, 42);
+    PropertyChangeWorkload.generate(first, PROPERTY_UUID, WORLD_UUID, 500, 42).join();
+    PropertyChangeWorkload.generate(second, PROPERTY_UUID, WORLD_UUID, 500, 42).join();
 
     assertEquals(first.getChanges(PROPERTY_UUID), second.getChanges(PROPERTY_UUID));
   }
@@ -26,7 +26,8 @@ class PropertyChangeWorkloadTest {
   void zeroCountRecordsNothing() {
     PropertyChangeManager manager = new PropertyChangeManager();
 
-    assertEquals(0, PropertyChangeWorkload.generate(manager, PROPERTY_UUID, WORLD_UUID, 0, 42));
+    assertEquals(
+        0, PropertyChangeWorkload.generate(manager, PROPERTY_UUID, WORLD_UUID, 0, 42).join());
     assertEquals(0, manager.getChangeCount());
   }
 

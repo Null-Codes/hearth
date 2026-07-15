@@ -31,6 +31,33 @@ class SqliteHearthStoreTest {
   }
 
   @Test
+  void operationsExecuteInSubmissionOrder() {
+    Property original =
+        new Property(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            "Original",
+            UUID.randomUUID(),
+            new BoundingBox(0, 0, 0, 10, 10, 10),
+            100);
+    Property updated =
+        new Property(
+            original.uuid(),
+            original.owner(),
+            "Updated",
+            original.world(),
+            original.region(),
+            original.timestamp());
+
+    try (SqliteHearthStore store = new SqliteHearthStore(directory.resolve("ordered.db"))) {
+      store.insert(original);
+      store.update(updated);
+
+      assertEquals("Updated", store.loadProperties().join().getFirst().name());
+    }
+  }
+
+  @Test
   void propertiesSurviveCreateUpdateAndRemove() {
     UUID propertyUuid = UUID.randomUUID();
     try (SqliteHearthStore store = new SqliteHearthStore(directory.resolve("properties.db"))) {

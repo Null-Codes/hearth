@@ -39,7 +39,7 @@ public final class PropertyChangeWorkload {
    * @param worldUuid world used by each block snapshot
    * @param count number of changes to generate
    * @param seed seed controlling UUIDs, positions, materials, and players
-   * @return the number of changes recorded
+   * @return completion containing the number of durably recorded changes
    */
   public static CompletableFuture<Integer> generate(
       PropertyChangeManager manager, UUID propertyUuid, UUID worldUuid, int count, long seed) {

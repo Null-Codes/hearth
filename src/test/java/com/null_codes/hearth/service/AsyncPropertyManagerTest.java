@@ -34,6 +34,19 @@ class AsyncPropertyManagerTest {
     assertTrue(manager.get(property.uuid()).isPresent());
   }
 
+  @Test
+  void failedPersistenceDoesNotExposeProperty() {
+    CompletableFuture<Void> insert = new CompletableFuture<>();
+    PropertyManager manager = new PropertyManager(new DelayedInsertStore(insert));
+    Property property = property();
+    CompletableFuture<Void> registration = manager.register(property);
+
+    insert.completeExceptionally(new IllegalStateException("write failed"));
+
+    assertThrows(CompletionException.class, registration::join);
+    assertFalse(manager.get(property.uuid()).isPresent());
+  }
+
   private static Property property() {
     return new Property(
         UUID.randomUUID(),

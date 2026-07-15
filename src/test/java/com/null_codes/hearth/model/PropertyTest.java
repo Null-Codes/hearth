@@ -1,6 +1,8 @@
 package com.null_codes.hearth.model;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.UUID;
@@ -88,6 +90,33 @@ public class PropertyTest {
     Location location = new Location(null, 5, 5, 5);
 
     assertFalse(property.contains(location));
+  }
+
+  @Test
+  void rejectsBlankName() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new Property(
+                PROPERTY_UUID,
+                OWNER_UUID,
+                " ",
+                WORLD_UUID,
+                new BoundingBox(0, 0, 0, 10, 10, 10),
+                0));
+  }
+
+  @Test
+  void isolatesRegionFromExternalMutation() {
+    BoundingBox region = new BoundingBox(0, 0, 0, 10, 10, 10);
+    Property property = property(region);
+
+    region.shift(100, 0, 0);
+    BoundingBox returnedRegion = property.region();
+    returnedRegion.shift(100, 0, 0);
+
+    assertTrue(property.contains(WORLD_UUID, 5, 5, 5));
+    assertNotEquals(returnedRegion, property.region());
   }
 
   private static Property property(BoundingBox region) {

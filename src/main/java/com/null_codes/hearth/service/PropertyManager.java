@@ -8,7 +8,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import org.bukkit.Location;
-import org.jetbrains.annotations.Nullable;
 
 public class PropertyManager {
 
@@ -41,10 +40,17 @@ public class PropertyManager {
     get(uuid).ifPresent(this.properties::remove);
   }
 
-  @Nullable public Property findProperty(Location location) {
+  public Optional<Property> findProperty(Location location) {
     for (Property property : this.properties) {
-      if (property.contains(location)) return property;
+      if (property.contains(location)) return Optional.of(property);
     }
-    return null;
+    return Optional.empty();
+  }
+
+  public Optional<Property> findProperty(UUID worldUuid, double x, double y, double z) {
+    for (Property property : this.properties) {
+      if (property.contains(worldUuid, x, y, z)) return Optional.of(property);
+    }
+    return Optional.empty();
   }
 }

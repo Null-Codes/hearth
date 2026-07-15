@@ -14,6 +14,7 @@ public class PropertyChangeManager {
   public void record(PropertyChange change) {
     Objects.requireNonNull(change, "change cannot be null");
 
+    // TODO Profile this linear duplicate check before choosing an index.
     if (get(change.uuid()).isPresent()) {
       throw new IllegalArgumentException(
           "A change with UUID " + change.uuid() + " is already recorded.");
@@ -25,6 +26,10 @@ public class PropertyChangeManager {
   public Optional<PropertyChange> get(UUID uuid) {
     Objects.requireNonNull(uuid, "uuid cannot be null");
     return changes.stream().filter(change -> change.uuid().equals(uuid)).findFirst();
+  }
+
+  public int getChangeCount() {
+    return changes.size();
   }
 
   public List<PropertyChange> getChanges(UUID propertyUuid) {

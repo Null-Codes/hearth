@@ -10,6 +10,7 @@ import com.null_codes.hearth.model.PropertyChange;
 import com.null_codes.hearth.model.PropertyChange.ChangeCause;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.bukkit.Material;
 import org.junit.jupiter.api.BeforeEach;
@@ -151,6 +152,19 @@ class PropertyChangeManagerTest {
     List<PropertyChange> changes = manager.getChanges(PROPERTY_UUID);
 
     assertEquals(List.of(first, second, third), changes);
+  }
+
+  @Test
+  void exposesDistinctPropertyUuidsForHistoryLookup() {
+    UUID otherPropertyUuid = UUID.randomUUID();
+    manager.record(
+        createChange(UUID.randomUUID(), PROPERTY_UUID, Instant.parse("2026-07-14T20:00:00Z")));
+    manager.record(
+        createChange(UUID.randomUUID(), PROPERTY_UUID, Instant.parse("2026-07-14T20:01:00Z")));
+    manager.record(
+        createChange(UUID.randomUUID(), otherPropertyUuid, Instant.parse("2026-07-14T20:02:00Z")));
+
+    assertEquals(Set.of(PROPERTY_UUID, otherPropertyUuid), manager.getPropertyUuids());
   }
 
   @Test

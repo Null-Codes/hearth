@@ -3,9 +3,11 @@ package com.null_codes.hearth.service;
 import com.null_codes.hearth.model.PropertyChange;
 import com.null_codes.hearth.storage.PropertyChangeStore;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public class PropertyChangeManager {
@@ -46,6 +48,15 @@ public class PropertyChangeManager {
 
   public int getChangeCount() {
     return changes.size();
+  }
+
+  /** Returns property UUIDs in the order their first changes were recorded. */
+  public Set<UUID> getPropertyUuids() {
+    LinkedHashSet<UUID> propertyUuids = new LinkedHashSet<>();
+    for (PropertyChange change : changes) {
+      propertyUuids.add(change.propertyUuid());
+    }
+    return Set.copyOf(propertyUuids);
   }
 
   public List<PropertyChange> getChanges(UUID propertyUuid) {

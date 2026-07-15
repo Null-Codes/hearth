@@ -3,14 +3,15 @@ package com.null_codes.hearth.storage;
 import com.null_codes.hearth.model.Property;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
-/** Defines durable property operations without coupling business logic to SQLite. */
+/** Defines ordered asynchronous property persistence operations. */
 public interface PropertyStore {
-  List<Property> loadProperties();
+  CompletableFuture<List<Property>> loadProperties();
 
-  void insert(Property property);
+  CompletableFuture<Void> insert(Property property);
 
-  void update(Property property);
+  CompletableFuture<Void> update(Property property);
 
-  void delete(UUID propertyUuid);
+  CompletableFuture<Void> delete(UUID propertyUuid);
 }

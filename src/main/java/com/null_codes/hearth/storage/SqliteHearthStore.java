@@ -15,28 +15,39 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.bukkit.Material;
 import org.bukkit.util.BoundingBox;
 
-/**
- * Stores Hearth state in one local SQLite database.
- *
- * <p>Writes intentionally remain synchronous so early profiles show the real baseline cost.
- */
+/** Stores Hearth state through an ordered, dedicated SQLite worker. */
 public final class SqliteHearthStore implements PropertyStore, PropertyChangeStore, AutoCloseable {
 
-  private final Connection connection;
+  private final ExecutorService executor =
+      Executors.newSingleThreadExecutor(
+          Thread.ofPlatform().name("Hearth Database").daemon(false).factory());
+  private final CompletableFuture<Connection> connection;
+  private CompletableFuture<Void> tail = CompletableFuture.completedFuture(null);
+  private boolean closing;
 
   public SqliteHearthStore(Path path) {
-    try {
-      connection = DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
-      createSchema();
-    } catch (SQLException exception) {
-      throw failure("open database", exception);
-    }
+    connection =
+        CompletableFuture.supplyAsync(
+            () -> {
+              try {
+                Connection opened =
+                    DriverManager.getConnection("jdbc:sqlite:" + path.toAbsolutePath());
+                createSchema(opened);
+                return opened;
+              } catch (SQLException exception) {
+                throw failure("open database", exception);
+              }
+            },
+            executor);
   }
 
-  private void createSchema() throws SQLException {
+  private static void createSchema(Connection connection) throws SQLException {
     try (Statement statement = connection.createStatement()) {
       statement.executeUpdate(
           """
@@ -62,54 +73,69 @@ public final class SqliteHearthStore implements PropertyStore, PropertyChangeSto
   }
 
   @Override
-  public List<Property> loadProperties() {
-    List<Property> properties = new ArrayList<>();
-    try (Statement statement = connection.createStatement();
-        ResultSet rows = statement.executeQuery("SELECT * FROM properties ORDER BY rowid")) {
-      while (rows.next()) {
-        properties.add(
-            new Property(
-                UUID.fromString(rows.getString("uuid")),
-                UUID.fromString(rows.getString("owner")),
-                rows.getString("name"),
-                UUID.fromString(rows.getString("world")),
-                new BoundingBox(
-                    rows.getDouble("min_x"),
-                    rows.getDouble("min_y"),
-                    rows.getDouble("min_z"),
-                    rows.getDouble("max_x"),
-                    rows.getDouble("max_y"),
-                    rows.getDouble("max_z")),
-                rows.getLong("created_at")));
-      }
-      return List.copyOf(properties);
-    } catch (SQLException exception) {
-      throw failure("load properties", exception);
-    }
+  public CompletableFuture<List<Property>> loadProperties() {
+    return submit(
+        "load properties",
+        database -> {
+          List<Property> properties = new ArrayList<>();
+          try (Statement statement = database.createStatement();
+              ResultSet rows = statement.executeQuery("SELECT * FROM properties ORDER BY rowid")) {
+            while (rows.next()) {
+              properties.add(
+                  new Property(
+                      UUID.fromString(rows.getString("uuid")),
+                      UUID.fromString(rows.getString("owner")),
+                      rows.getString("name"),
+                      UUID.fromString(rows.getString("world")),
+                      new BoundingBox(
+                          rows.getDouble("min_x"),
+                          rows.getDouble("min_y"),
+                          rows.getDouble("min_z"),
+                          rows.getDouble("max_x"),
+                          rows.getDouble("max_y"),
+                          rows.getDouble("max_z")),
+                      rows.getLong("created_at")));
+            }
+          }
+          return List.copyOf(properties);
+        });
   }
 
   @Override
-  public void insert(Property property) {
-    writeProperty(
-        """
-        INSERT INTO properties
-          (uuid, owner, name, world, min_x, min_y, min_z, max_x, max_y, max_z, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        property);
+  public CompletableFuture<Void> insert(Property property) {
+    return submit(
+        "persist property " + property.uuid(),
+        database -> {
+          writeProperty(
+              database,
+              """
+              INSERT INTO properties
+                (uuid, owner, name, world, min_x, min_y, min_z, max_x, max_y, max_z, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              """,
+              property);
+          return null;
+        });
   }
 
   @Override
-  public void update(Property property) {
-    writeProperty(
-        """
-        UPDATE properties SET owner=?, name=?, world=?, min_x=?, min_y=?, min_z=?,
-          max_x=?, max_y=?, max_z=?, created_at=? WHERE uuid=?
-        """,
-        property);
+  public CompletableFuture<Void> update(Property property) {
+    return submit(
+        "persist property " + property.uuid(),
+        database -> {
+          writeProperty(
+              database,
+              """
+              UPDATE properties SET owner=?, name=?, world=?, min_x=?, min_y=?, min_z=?,
+                max_x=?, max_y=?, max_z=?, created_at=? WHERE uuid=?
+              """,
+              property);
+          return null;
+        });
   }
 
-  private void writeProperty(String sql, Property property) {
+  private static void writeProperty(Connection connection, String sql, Property property)
+      throws SQLException {
     BoundingBox region = property.region();
     try (PreparedStatement statement = connection.prepareStatement(sql)) {
       boolean update = sql.startsWith("UPDATE");
@@ -129,43 +155,47 @@ public final class SqliteHearthStore implements PropertyStore, PropertyChangeSto
       if (statement.executeUpdate() != 1) {
         throw new StorageException("Could not persist property " + property.uuid() + ".", null);
       }
-    } catch (SQLException exception) {
-      throw failure("persist property " + property.uuid(), exception);
     }
   }
 
   @Override
-  public void delete(UUID propertyUuid) {
-    try (PreparedStatement statement =
-        connection.prepareStatement("DELETE FROM properties WHERE uuid=?")) {
-      statement.setString(1, propertyUuid.toString());
-      statement.executeUpdate();
-    } catch (SQLException exception) {
-      throw failure("delete property " + propertyUuid, exception);
-    }
+  public CompletableFuture<Void> delete(UUID propertyUuid) {
+    return submit(
+        "delete property " + propertyUuid,
+        database -> {
+          try (PreparedStatement statement =
+              database.prepareStatement("DELETE FROM properties WHERE uuid=?")) {
+            statement.setString(1, propertyUuid.toString());
+            statement.executeUpdate();
+          }
+          return null;
+        });
   }
 
   @Override
-  public List<PropertyChange> loadChanges() {
-    List<PropertyChange> changes = new ArrayList<>();
-    try (Statement statement = connection.createStatement();
-        ResultSet rows = statement.executeQuery("SELECT * FROM property_changes ORDER BY rowid")) {
-      while (rows.next()) {
-        String playerUuid = rows.getString("player_uuid");
-        changes.add(
-            new PropertyChange(
-                UUID.fromString(rows.getString("uuid")),
-                UUID.fromString(rows.getString("property_uuid")),
-                Instant.parse(rows.getString("changed_at")),
-                playerUuid == null ? null : UUID.fromString(playerUuid),
-                PropertyChange.ChangeCause.valueOf(rows.getString("cause")),
-                readSnapshot(rows, "before"),
-                readSnapshot(rows, "after")));
-      }
-      return List.copyOf(changes);
-    } catch (SQLException exception) {
-      throw failure("load property changes", exception);
-    }
+  public CompletableFuture<List<PropertyChange>> loadChanges() {
+    return submit(
+        "load property changes",
+        database -> {
+          List<PropertyChange> changes = new ArrayList<>();
+          try (Statement statement = database.createStatement();
+              ResultSet rows =
+                  statement.executeQuery("SELECT * FROM property_changes ORDER BY rowid")) {
+            while (rows.next()) {
+              String playerUuid = rows.getString("player_uuid");
+              changes.add(
+                  new PropertyChange(
+                      UUID.fromString(rows.getString("uuid")),
+                      UUID.fromString(rows.getString("property_uuid")),
+                      Instant.parse(rows.getString("changed_at")),
+                      playerUuid == null ? null : UUID.fromString(playerUuid),
+                      PropertyChange.ChangeCause.valueOf(rows.getString("cause")),
+                      readSnapshot(rows, "before"),
+                      readSnapshot(rows, "after")));
+            }
+          }
+          return List.copyOf(changes);
+        });
   }
 
   private static BlockSnapshot readSnapshot(ResultSet rows, String prefix) throws SQLException {
@@ -180,25 +210,28 @@ public final class SqliteHearthStore implements PropertyStore, PropertyChangeSto
   }
 
   @Override
-  public void insert(PropertyChange change) {
-    try (PreparedStatement statement =
-        connection.prepareStatement(
-            """
-            INSERT INTO property_changes VALUES
-              (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """)) {
-      statement.setString(1, change.uuid().toString());
-      statement.setString(2, change.propertyUuid().toString());
-      statement.setString(3, change.timestamp().toString());
-      if (change.playerUuid() == null) statement.setNull(4, Types.VARCHAR);
-      else statement.setString(4, change.playerUuid().toString());
-      statement.setString(5, change.cause().name());
-      writeSnapshot(statement, 6, change.before());
-      writeSnapshot(statement, 12, change.after());
-      statement.executeUpdate();
-    } catch (SQLException exception) {
-      throw failure("persist property change " + change.uuid(), exception);
-    }
+  public CompletableFuture<Void> insert(PropertyChange change) {
+    return submit(
+        "persist property change " + change.uuid(),
+        database -> {
+          try (PreparedStatement statement =
+              database.prepareStatement(
+                  """
+                  INSERT INTO property_changes VALUES
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  """)) {
+            statement.setString(1, change.uuid().toString());
+            statement.setString(2, change.propertyUuid().toString());
+            statement.setString(3, change.timestamp().toString());
+            if (change.playerUuid() == null) statement.setNull(4, Types.VARCHAR);
+            else statement.setString(4, change.playerUuid().toString());
+            statement.setString(5, change.cause().name());
+            writeSnapshot(statement, 6, change.before());
+            writeSnapshot(statement, 12, change.after());
+            statement.executeUpdate();
+          }
+          return null;
+        });
   }
 
   private static void writeSnapshot(PreparedStatement statement, int offset, BlockSnapshot snapshot)
@@ -212,16 +245,57 @@ public final class SqliteHearthStore implements PropertyStore, PropertyChangeSto
     statement.setString(offset + 5, snapshot.blockData());
   }
 
+  public synchronized CompletableFuture<Void> closeAsync() {
+    if (closing) return tail;
+    closing = true;
+    CompletableFuture<Void> closed =
+        submitInternal(
+            "close database",
+            database -> {
+              database.close();
+              return null;
+            });
+    closed.whenComplete((ignored, failure) -> executor.shutdown());
+    return closed;
+  }
+
   @Override
   public void close() {
-    try {
-      connection.close();
-    } catch (SQLException exception) {
-      throw failure("close database", exception);
+    closeAsync().join();
+  }
+
+  private synchronized <T> CompletableFuture<T> submit(
+      String operation, DatabaseOperation<T> task) {
+    if (closing) {
+      return CompletableFuture.failedFuture(
+          new StorageException("Database is closing; could not " + operation + ".", null));
     }
+    return submitInternal(operation, task);
+  }
+
+  private <T> CompletableFuture<T> submitInternal(String operation, DatabaseOperation<T> task) {
+    CompletableFuture<T> submitted =
+        tail.handle((ignored, previousFailure) -> null)
+            .thenCompose(ignored -> connection)
+            .thenApplyAsync(
+                database -> {
+                  try {
+                    return task.execute(database);
+                  } catch (SQLException exception) {
+                    throw failure(operation, exception);
+                  }
+                },
+                executor);
+    tail = submitted.handle((ignored, failure) -> null);
+    return submitted;
   }
 
   private static StorageException failure(String operation, SQLException cause) {
     return new StorageException("Could not " + operation + ".", cause);
+  }
+
+  @FunctionalInterface
+  private interface DatabaseOperation<T> {
+    T execute(Connection connection) throws SQLException;
   }
 }

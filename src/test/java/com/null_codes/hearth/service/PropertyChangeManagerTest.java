@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletionException;
 import org.bukkit.Material;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -69,8 +70,9 @@ class PropertyChangeManagerTest {
 
     manager.record(first);
 
-    IllegalArgumentException exception =
-        assertThrows(IllegalArgumentException.class, () -> manager.record(duplicate));
+    CompletionException completion =
+        assertThrows(CompletionException.class, () -> manager.record(duplicate).join());
+    IllegalArgumentException exception = (IllegalArgumentException) completion.getCause();
 
     assertEquals(
         "A change with UUID " + changeUuid + " is already recorded.", exception.getMessage());
@@ -88,7 +90,9 @@ class PropertyChangeManagerTest {
 
     manager.record(original);
 
-    assertThrows(IllegalArgumentException.class, () -> manager.record(duplicate));
+    assertTrue(
+        assertThrows(CompletionException.class, () -> manager.record(duplicate).join()).getCause()
+            instanceof IllegalArgumentException);
 
     assertSame(original, manager.get(changeUuid).orElseThrow());
   }

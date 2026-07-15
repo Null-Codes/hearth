@@ -21,10 +21,21 @@ class SqliteHearthStoreTest {
   @TempDir Path directory;
 
   @Test
+  void databaseOperationsRunOnDedicatedWorker() {
+    try (SqliteHearthStore store = new SqliteHearthStore(directory.resolve("thread.db"))) {
+      String threadName =
+          store.loadProperties().thenApply(ignored -> Thread.currentThread().getName()).join();
+
+      assertEquals("Hearth Database", threadName);
+    }
+  }
+
+  @Test
   void propertiesSurviveCreateUpdateAndRemove() {
     UUID propertyUuid = UUID.randomUUID();
     try (SqliteHearthStore store = new SqliteHearthStore(directory.resolve("properties.db"))) {
       PropertyManager manager = new PropertyManager(store);
+      manager.ready().join();
       Property original =
           new Property(
               propertyUuid,
@@ -33,25 +44,30 @@ class SqliteHearthStoreTest {
               UUID.randomUUID(),
               new BoundingBox(0, 0, 0, 10, 10, 10),
               100);
-      manager.register(original);
-      manager.update(
-          new Property(
-              original.uuid(),
-              original.owner(),
-              "Renamed",
-              original.world(),
-              original.region(),
-              original.timestamp()));
+      manager.register(original).join();
+      manager
+          .update(
+              new Property(
+                  original.uuid(),
+                  original.owner(),
+                  "Renamed",
+                  original.world(),
+                  original.region(),
+                  original.timestamp()))
+          .join();
     }
 
     try (SqliteHearthStore store = new SqliteHearthStore(directory.resolve("properties.db"))) {
       PropertyManager manager = new PropertyManager(store);
+      manager.ready().join();
       assertEquals("Renamed", manager.get(propertyUuid).orElseThrow().name());
-      assertTrue(manager.remove(propertyUuid));
+      assertTrue(manager.remove(propertyUuid).join());
     }
 
     try (SqliteHearthStore store = new SqliteHearthStore(directory.resolve("properties.db"))) {
-      assertTrue(new PropertyManager(store).getProperties().isEmpty());
+      PropertyManager manager = new PropertyManager(store);
+      manager.ready().join();
+      assertTrue(manager.getProperties().isEmpty());
     }
   }
 
@@ -70,12 +86,15 @@ class SqliteHearthStoreTest {
             BlockSnapshot.airAt(worldUuid, 1, 2, 3));
 
     try (SqliteHearthStore store = new SqliteHearthStore(directory.resolve("history.db"))) {
-      new PropertyChangeManager(store).record(change);
+      PropertyChangeManager manager = new PropertyChangeManager(store);
+      manager.ready().join();
+      manager.record(change).join();
     }
 
     try (SqliteHearthStore store = new SqliteHearthStore(directory.resolve("history.db"))) {
-      assertEquals(
-          java.util.List.of(change), new PropertyChangeManager(store).getChanges(propertyUuid));
+      PropertyChangeManager manager = new PropertyChangeManager(store);
+      manager.ready().join();
+      assertEquals(java.util.List.of(change), manager.getChanges(propertyUuid));
     }
   }
 }

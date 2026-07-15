@@ -2,10 +2,11 @@ package com.null_codes.hearth.storage;
 
 import com.null_codes.hearth.model.PropertyChange;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
-/** Defines append-only property history persistence. */
+/** Defines ordered asynchronous append-only property history persistence. */
 public interface PropertyChangeStore {
-  List<PropertyChange> loadChanges();
+  CompletableFuture<List<PropertyChange>> loadChanges();
 
-  void insert(PropertyChange change);
+  CompletableFuture<Void> insert(PropertyChange change);
 }

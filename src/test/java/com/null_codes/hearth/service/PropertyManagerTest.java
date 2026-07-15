@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.null_codes.hearth.model.Property;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletionException;
 import org.bukkit.Location;
 import org.bukkit.util.BoundingBox;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,7 +57,10 @@ public class PropertyManagerTest {
     Property property = testProperty();
 
     propertyManager.register(property);
-    assertThrows(IllegalArgumentException.class, () -> propertyManager.register(property));
+    assertTrue(
+        assertThrows(CompletionException.class, () -> propertyManager.register(property).join())
+                .getCause()
+            instanceof IllegalArgumentException);
   }
 
   @Test
@@ -65,7 +69,7 @@ public class PropertyManagerTest {
     UUID propertyUuid = property.uuid();
 
     propertyManager.register(property);
-    assertTrue(propertyManager.remove(propertyUuid));
+    assertTrue(propertyManager.remove(propertyUuid).join());
     assertFalse(propertyManager.get(propertyUuid).isPresent());
   }
 
@@ -77,7 +81,7 @@ public class PropertyManagerTest {
     propertyManager.register(propertyOne);
     List<Property> props1 = propertyManager.getProperties();
 
-    assertFalse(propertyManager.remove(propertyTwo));
+    assertFalse(propertyManager.remove(propertyTwo).join());
     List<Property> props2 = propertyManager.getProperties();
 
     assertEquals(props1, props2);
@@ -105,7 +109,10 @@ public class PropertyManagerTest {
   void updateRejectsUnknownProperty() {
     Property property = testProperty();
 
-    assertThrows(IllegalArgumentException.class, () -> propertyManager.update(property));
+    assertTrue(
+        assertThrows(CompletionException.class, () -> propertyManager.update(property).join())
+                .getCause()
+            instanceof IllegalArgumentException);
   }
 
   @Test
@@ -121,7 +128,12 @@ public class PropertyManagerTest {
             original.timestamp() + 1);
     propertyManager.register(original);
 
-    assertThrows(IllegalArgumentException.class, () -> propertyManager.update(changedTimestamp));
+    assertTrue(
+        assertThrows(
+                    CompletionException.class,
+                    () -> propertyManager.update(changedTimestamp).join())
+                .getCause()
+            instanceof IllegalArgumentException);
   }
 
   @Test

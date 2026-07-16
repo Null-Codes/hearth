@@ -8,10 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.null_codes.hearth.model.BlockSnapshot;
 import com.null_codes.hearth.model.PropertyChange;
 import com.null_codes.hearth.model.PropertyChange.ChangeCause;
+import com.null_codes.hearth.storage.PropertyChangeStore;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import org.bukkit.Material;
 import org.junit.jupiter.api.BeforeEach;
@@ -186,6 +188,38 @@ class PropertyChangeManagerTest {
     assertSame(second, manager.get(second.uuid()).orElseThrow());
   }
 
+  @Test
+  void loadsMultipleUniqueChangesInStoreOrderAndIndexesThemByUuid() {
+    PropertyChange first =
+        createChange(UUID.randomUUID(), PROPERTY_UUID, Instant.parse("2026-07-14T20:02:00Z"));
+    PropertyChange second =
+        createChange(UUID.randomUUID(), PROPERTY_UUID, Instant.parse("2026-07-14T20:01:00Z"));
+    manager = new PropertyChangeManager(new StubStore(List.of(first, second)));
+
+    manager.ready().join();
+
+    assertSame(first, manager.get(first.uuid()).orElseThrow());
+    assertSame(second, manager.get(second.uuid()).orElseThrow());
+    assertEquals(List.of(first, second), manager.getChanges(PROPERTY_UUID));
+  }
+
+  @Test
+  void loadRejectsDuplicateChangeUuids() {
+    UUID changeUuid = UUID.randomUUID();
+    PropertyChange first =
+        createChange(changeUuid, PROPERTY_UUID, Instant.parse("2026-07-14T20:00:00Z"));
+    PropertyChange duplicate =
+        createChange(changeUuid, PROPERTY_UUID, Instant.parse("2026-07-14T20:01:00Z"));
+    manager = new PropertyChangeManager(new StubStore(List.of(first, duplicate)));
+
+    CompletionException completion =
+        assertThrows(CompletionException.class, () -> manager.ready().join());
+
+    assertEquals(
+        "Store contains duplicate change UUID " + changeUuid + ".",
+        completion.getCause().getMessage());
+  }
+
   private PropertyChange createChange(UUID changeUuid, UUID propertyUuid, Instant timestamp) {
 
     BlockSnapshot before =
@@ -201,5 +235,18 @@ class PropertyChangeManagerTest {
         ChangeCause.PLAYER_BREAK,
         before,
         after);
+  }
+
+  private record StubStore(List<PropertyChange> loaded) implements PropertyChangeStore {
+
+    @Override
+    public CompletableFuture<List<PropertyChange>> loadChanges() {
+      return CompletableFuture.completedFuture(loaded);
+    }
+
+    @Override
+    public CompletableFuture<Void> insert(PropertyChange change) {
+      return CompletableFuture.completedFuture(null);
+    }
   }
 }
